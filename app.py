@@ -10,8 +10,8 @@ app = Flask(__name__)
 # ============================================
 # KONFIGURASI TELEGRAM
 # ============================================
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "GANTI_TOKEN_DI_SINI")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "GANTI_CHAT_ID_DI_SINI")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "8647021039:AAHOwTmysMiq81h3vF-o04T3T-oHUU5tU-g")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "6600650184")
 
 # ============================================
 # KONFIGURASI SURVEI
