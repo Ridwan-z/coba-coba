@@ -19,8 +19,8 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "6600650184")
 INFO_SURVEI = {
     "judul": "Survei Penggunaan Media Sosial",
     "subjudul": "Tugas Kelompok Mata Pelajaran Sosiologi",
-    "kelas": "Kelas XI IPS 2",
-    "sekolah": "SMA Negeri 1",
+    "kelas": "Kelas 12.2.5 IPS",
+    "sekolah": "SMA Negeri 8 Kabupaten Tangerang",
     "guru": "Bu Sari Wulandari, S.Pd.",
     "deadline": "20 September 2026"
 }
