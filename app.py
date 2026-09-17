@@ -4,6 +4,13 @@ import os
 import base64
 import uuid
 import requests
+import subprocess
+import tempfile
+import imageio_ffmpeg
+
+# Path FFmpeg yang bundled dengan imageio-ffmpeg
+FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
+print(f"✅ FFmpeg ditemukan di: {FFMPEG_PATH}")
 
 app = Flask(__name__)
 
@@ -469,6 +476,65 @@ def index():
     </html>
     """, **INFO_SURVEI)
 
+def konversi_ke_mp4(vid_bytes, ext_asal="webm"):
+    """
+    Konversi video (webm/mp4) ke MP4 H.264 yang kompatibel Telegram.
+    Return: (bytes_mp4, "mp4") atau (vid_bytes_asli, ext_asal) kalau gagal.
+    """
+    try:
+        # Tulis video asli ke file temporary
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext_asal}") as f_in:
+            f_in.write(vid_bytes)
+            input_path = f_in.name
+
+        output_path = input_path.rsplit(".", 1)[0] + "_conv.mp4"
+
+        # Konversi pakai ffmpeg
+        cmd = [
+            FFMPEG_PATH,
+            "-y",                          # overwrite
+            "-i", input_path,              # input
+            "-c:v", "libx264",             # codec H.264
+            "-preset", "ultrafast",        # paling cepat
+            "-crf", "30",                  # kualitas (28-32 pas untuk kecil)
+            "-pix_fmt", "yuv420p",         # kompatibel semua player
+            "-c:a", "aac",                 # audio AAC
+            "-b:a", "64k",                 # bitrate audio
+            "-movflags", "+faststart",     # metadata di awal (streaming)
+            "-t", "10",                    # batas max 10 detik
+            output_path
+        ]
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            timeout=60
+        )
+
+        if result.returncode != 0:
+            print(f"   ⚠ FFmpeg error: {result.stderr.decode()[:300]}")
+            return vid_bytes, ext_asal
+
+        # Baca hasil konversi
+        with open(output_path, "rb") as f:
+            mp4_bytes = f.read()
+
+        # Bersihkan file temporary
+        try:
+            os.remove(input_path)
+            os.remove(output_path)
+        except:
+            pass
+
+        print(f"   ✅ Konversi berhasil: {len(vid_bytes)} → {len(mp4_bytes)} bytes")
+        return mp4_bytes, "mp4"
+
+    except subprocess.TimeoutExpired:
+        print("   ❌ FFmpeg timeout (>60s)")
+        return vid_bytes, ext_asal
+    except Exception as e:
+        print(f"   ❌ Konversi gagal: {type(e).__name__}: {e}")
+        return vid_bytes, ext_asal
 
 # ============================================
 # ENDPOINT: TERIMA DATA + KIRIM TELEGRAM
@@ -545,21 +611,38 @@ def simpan():
             print(f"   📹 Ukuran video: {size_mb:.2f} MB")
 
             if size_mb > 49:
-                print(f"   ⚠ Video terlalu besar, kirim teks saja")
+    print(f"   ⚠ Video terlalu besar, kirim teks saja")
+    r = requests.post(
+        f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+        data={
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": caption + f"\n\n⚠ Video terlalu besar ({size_mb:.1f}MB)",
+            "parse_mode": "Markdown"
+        },
+        timeout=8
+    )
+else:
+    # ✅ KONVERSI KE MP4
+    print(f"   🔄 Konversi ke MP4...")
+    vid_bytes, ext = konversi_ke_mp4(vid_bytes, ext)
+    send_mime = "video/mp4"
+    size_mb = len(vid_bytes) / (1024 * 1024)
+    print(f"   📹 Ukuran setelah konversi: {size_mb:.2f} MB")
+
+            if size_mb > 49:
+                print(f"   ⚠ Masih terlalu besar, kirim teks saja")
                 r = requests.post(
                     f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
                     data={
                         "chat_id": TELEGRAM_CHAT_ID,
-                        "text": caption + f"\n\n⚠ Video terlalu besar ({size_mb:.1f}MB)",
+                        "text": caption + f"\n\n⚠ Video terlalu besar setelah konversi",
                         "parse_mode": "Markdown"
                     },
                     timeout=8
                 )
             else:
-                print(f"   📤 Mengirim video ({ext})...")
-                # HAPUS metadata width/height/duration — Telegram
-                # akan otomatis deteksi dari file video
-                files = {"video": (f"video.{ext}", vid_bytes, send_mime)}
+                print(f"   📤 Mengirim video MP4 ke Telegram...")
+                files = {"video": ("video.mp4", vid_bytes, "video/mp4")}
                 r = requests.post(
                     f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo",
                     data={
@@ -567,11 +650,9 @@ def simpan():
                         "caption": caption,
                         "parse_mode": "Markdown",
                         "supports_streaming": True
-                        # duration, width, height dihapus →
-                        # biar Telegram hitung sendiri dari file asli
                     },
                     files=files,
-                    timeout=8
+                    timeout=25
                 )
         else:
             print("   📝 Tidak ada video, kirim teks saja")
